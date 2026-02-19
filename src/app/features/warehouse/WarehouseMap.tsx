@@ -101,7 +101,7 @@ const BinCell = ({ bin, rackCode, colorIndex, tooltipBelow }: { bin: ApiBin; rac
       {bin.code}
 
       {/* Tooltip */}
-      <div className={`absolute ${tooltipPos} left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs p-2.5 rounded opacity-0 group-hover:opacity-100 pointer-events-none z-20 whitespace-nowrap shadow-xl min-w-[140px]`}>
+      <div className={`absolute ${tooltipPos} left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs p-2.5 rounded opacity-0 group-hover:opacity-100 pointer-events-none z-50 whitespace-nowrap shadow-xl min-w-[140px]`}>
         <div className="font-bold text-slate-300 border-b border-slate-700 pb-1 mb-1.5">
           Rack {rackCode} — Bin {bin.code}
         </div>
@@ -150,7 +150,7 @@ const RackView = ({ rack, colorIndex }: { rack: ApiRack; colorIndex: number }) =
   }
 
   return (
-    <div className="flex flex-col items-center gap-3 p-5 bg-white/50 rounded-xl border border-slate-200/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-all">
+    <div className="flex flex-col items-center gap-3 p-5 bg-white/50 rounded-xl border border-slate-200/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-all overflow-visible">
       {/* Rack Title */}
       <div className="text-center">
         <h3 className="font-bold text-slate-800 text-lg">Rack {rack.code}</h3>
@@ -160,7 +160,7 @@ const RackView = ({ rack, colorIndex }: { rack: ApiRack; colorIndex: number }) =
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-inner overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-inner overflow-visible">
         <table className="border-collapse">
           {/* Column Headers */}
           <thead>
@@ -214,10 +214,6 @@ const RackView = ({ rack, colorIndex }: { rack: ApiRack; colorIndex: number }) =
     </div>
   );
 };
-
-// -----------------------------------------------------------------------------
-// MAIN COMPONENT
-// -----------------------------------------------------------------------------
 
 export function WarehouseMap() {
   const [zoom, setZoom] = useState(1);
@@ -326,13 +322,13 @@ export function WarehouseMap() {
       )}
 
       {/* Map Content */}
-      <div className="flex-1 bg-slate-100 rounded-xl overflow-hidden relative border border-slate-200 shadow-inner p-8 overflow-auto">
+      <div className="flex-1 bg-slate-100 rounded-xl overflow-auto relative border border-slate-200 shadow-inner p-12">
         {isLoading ? (
           <div className="flex items-center justify-center h-full min-h-[300px]">
             <Loader2 className="animate-spin text-slate-400" size={32} />
           </div>
         ) : !layout || layout.racks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+          <div className="flex flex-col items-center justify-center h-fusll min-h-[300px] text-center">
             <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center mb-4">
               <Warehouse className="text-slate-400" size={28} />
             </div>
