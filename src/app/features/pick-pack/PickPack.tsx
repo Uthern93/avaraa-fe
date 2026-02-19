@@ -39,8 +39,12 @@ import autoTable from 'jspdf-autotable';
 
 interface ApiDispatchItem {
   id: number;
-  dispatch_id: number;
+  delivery_order_id: number;
   item_id: number;
+  warehouse_id?: number;
+  batch_id?: string;
+  bin_id?: number;
+  expiry_date?: string;
   quantity: number;
   picked_quantity?: number;
   packed_quantity?: number;
@@ -49,10 +53,22 @@ interface ApiDispatchItem {
     item_sku: string;
     item_name: string;
   };
-  stock?: {
-    warehouse_name: string;
-    rack_code: string;
-    bin_code: string;
+  warehouse?: {
+    id: number;
+    name: string;
+    location: string;
+  };
+  bin?: {
+    id: number;
+    rack_id: number;
+    number: string;
+    code: string;
+    rack?: {
+      id: number;
+      warehouse_id: number;
+      code: string;
+      label: string;
+    };
   } | null;
 }
 
@@ -259,12 +275,14 @@ export function PickPack() {
       `${idx + 1}`,
       item.item?.item_sku || '-',
       item.item?.item_name || '-',
+      item.bin?.rack?.code || '-',
+      item.bin?.code || '-',
       `${item.quantity}`,
     ]);
 
     autoTable(doc, {
       startY: finalY + 4,
-      head: [['#', 'SKU', 'Item Name', 'Qty']],
+      head: [['#', 'SKU', 'Item Name', 'Rack', 'Bin', 'Qty']],
       body: itemRows,
       theme: 'striped',
       styles: { fontSize: 8, cellPadding: 3 },
@@ -277,9 +295,11 @@ export function PickPack() {
       alternateRowStyles: { fillColor: [248, 250, 252] },
       columnStyles: {
         0: { cellWidth: 10, halign: 'center' },
-        1: { cellWidth: 35, font: 'courier' },
+        1: { cellWidth: 30, font: 'courier' },
         2: { cellWidth: 'auto' },
-        3: { cellWidth: 18, halign: 'center' },
+        3: { cellWidth: 22, halign: 'center' },
+        4: { cellWidth: 22, halign: 'center' },
+        5: { cellWidth: 18, halign: 'center' },
       },
       margin: { left: 14, right: 14 },
     });
@@ -515,10 +535,10 @@ export function PickPack() {
                             <p className="font-medium text-slate-800 text-sm">{item.item?.item_name || '-'}</p>
                             <div className="flex items-center gap-2 mt-1">
                               <p className="text-xs text-slate-500 font-mono">{item.item?.item_sku || '-'}</p>
-                              {item.stock && (
+                              {item.bin && (
                                 <div className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                                   <MapPin size={10} />
-                                  <span>{item.stock.rack_code}-{item.stock.bin_code}</span>
+                                  <span>{item.bin.rack?.code ? `${item.bin.rack.code} — ` : ''}{item.bin.code}</span>
                                 </div>
                               )}
                             </div>
