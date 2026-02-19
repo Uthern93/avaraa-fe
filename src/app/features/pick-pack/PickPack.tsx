@@ -1,8 +1,4 @@
-﻿// =============================================================================
-// PICK & PACK FEATURE MODULE  API-DRIVEN
-// =============================================================================
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList,
   Package,
@@ -16,6 +12,8 @@ import {
   Search,
   Loader2,
   ArrowLeft,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -121,6 +119,10 @@ export function PickPack() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Bulk selection state (pending orders only)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+
   // Server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -179,6 +181,159 @@ export function PickPack() {
     }, 400);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // ---- Bulk selection helpers ----
+  const pendingPickOrders = useMemo(() => orders.filter(o => o.status === 'pending'), [orders]);
+  const allPendingSelected = pendingPickOrders.length > 0 && pendingPickOrders.every(o => selectedIds.has(o.id));
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingPickOrders.map(o => o.id)));
+    }
+  };
+
+  // ---- Bulk start picking & export ----
+  const exportBulkPickingPDF = (selectedOrders: ApiDispatchOrder[]) => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    selectedOrders.forEach((order, orderIdx) => {
+      if (orderIdx > 0) doc.addPage();
+
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0);
+      doc.text('Pick List', 14, 22);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100);
+      doc.text(
+        `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+        14, 30,
+      );
+      doc.text(`Order ${orderIdx + 1} of ${selectedOrders.length}`, pageWidth - 14, 30, { align: 'right' });
+
+      doc.setDrawColor(200);
+      doc.line(14, 34, pageWidth - 14, 34);
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0);
+      doc.text('Order Details', 14, 44);
+
+      const details = [
+        ['Order Number', order.order_number],
+        ['Customer', order.is_current_user ? 'Current Customer' : (order.user?.name || '-')],
+        ['Status', 'Picking Started'],
+        ['Priority', (order.priority || 'normal').replace(/\b\w/g, c => c.toUpperCase())],
+        ['Due Date', order.due_date],
+        ['Total Items', `${order.items.length}`],
+        ['Total Units', `${order.items.reduce((s, i) => s + i.quantity, 0)}`],
+      ];
+
+      autoTable(doc, {
+        startY: 48,
+        head: [],
+        body: details,
+        theme: 'plain',
+        styles: { fontSize: 9, cellPadding: 2 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 45, textColor: [100, 100, 100] },
+          1: { cellWidth: 'auto' },
+        },
+        margin: { left: 14, right: 14 },
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0);
+      doc.text('Items to Pick', 14, finalY);
+
+      const itemRows = order.items.map((item, idx) => [
+        `${idx + 1}`,
+        item.item?.item_sku || '-',
+        item.item?.item_name || '-',
+        item.bin?.rack?.code || '-',
+        item.bin?.code || '-',
+        `${item.quantity}`,
+      ]);
+
+      autoTable(doc, {
+        startY: finalY + 4,
+        head: [['#', 'SKU', 'Item Name', 'Rack', 'Bin', 'Qty']],
+        body: itemRows,
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: {
+          fillColor: [51, 65, 85],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8,
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 30, font: 'courier' },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 22, halign: 'center' },
+          4: { cellWidth: 22, halign: 'center' },
+          5: { cellWidth: 18, halign: 'center' },
+        },
+        margin: { left: 14, right: 14 },
+      });
+    });
+
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text(
+        `Bulk Pick List \u2014 Page ${i} of ${pageCount}`,
+        pageWidth / 2,
+        doc.internal.pageSize.getHeight() - 10,
+        { align: 'center' },
+      );
+    }
+
+    const timestamp = new Date().toISOString().slice(0, 10);
+    doc.save(`Pick-List-${timestamp}.pdf`);
+  };
+
+  const handleBulkStartPicking = async () => {
+    const selected = orders.filter(o => selectedIds.has(o.id));
+    if (selected.length === 0) return;
+
+    setIsBulkProcessing(true);
+    try {
+      exportBulkPickingPDF(selected);
+
+      await apiClient.post('/dispatch-requests/bulk-start-picking', {
+        dispatch_ids: selected.map(o => o.id),
+      });
+
+      toast.success(`Picking started for ${selected.length} order(s) & PDF exported`);
+      setSelectedIds(new Set());
+      fetchOrders();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Bulk start picking failed');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
 
   // ---- Status change (dedicated endpoints, no payload) ----
   const statusEndpoint = (orderId: number, newStatus: string) => {
@@ -405,6 +560,17 @@ export function PickPack() {
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
         </div>
+        {activeTab === 'PICKING' && pendingPickOrders.length > 0 && (
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 mt-3 text-xs text-slate-500 hover:text-blue-600 transition-colors"
+          >
+            {allPendingSelected
+              ? <CheckSquare size={14} className="text-blue-600" />
+              : <Square size={14} />}
+            Select all pending ({pendingPickOrders.length})
+          </button>
+        )}
       </div>
 
       {/* Order List */}
@@ -433,9 +599,22 @@ export function PickPack() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 onClick={() => { setSelectedOrder(order); setIsModalOpen(true); }}
-                className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+                className={`bg-white rounded-xl shadow-sm border overflow-hidden cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group ${
+                  selectedIds.has(order.id) ? 'border-blue-300 bg-blue-50/30' : 'border-slate-100'
+                }`}
               >
                 <div className="p-4 flex flex-col sm:flex-row gap-4 items-center">
+                  {/* Checkbox for pending orders in PICKING tab */}
+                  {activeTab === 'PICKING' && order.status === 'pending' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(order.id); }}
+                      className="flex-shrink-0 text-slate-400 hover:text-blue-600 transition-colors"
+                    >
+                      {selectedIds.has(order.id)
+                        ? <CheckSquare size={20} className="text-blue-600" />
+                        : <Square size={20} />}
+                    </button>
+                  )}
                   <div className={`p-3 rounded-xl shrink-0 ${
                     activeTab === 'PICKING' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'
                   }`}>
@@ -494,6 +673,40 @@ export function PickPack() {
             />
           </div>
         )}
+
+        {/* Bulk action bar */}
+        <AnimatePresence>
+          {selectedIds.size > 0 && (
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+              className="bg-white rounded-xl shadow-md border border-blue-200 p-4 flex items-center justify-between gap-3 sticky bottom-0"
+            >
+              <span className="text-sm font-semibold text-blue-700">
+                {selectedIds.size} order{selectedIds.size > 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 flex items-center gap-1.5"
+                  onClick={handleBulkStartPicking}
+                  disabled={isBulkProcessing}
+                >
+                  {isBulkProcessing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Start Picking & Export
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Order Detail Modal */}

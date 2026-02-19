@@ -18,6 +18,8 @@ import {
   Loader2,
   ArrowLeft,
   Download,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -231,6 +233,121 @@ const exportInboundPDF = (order: ApiInboundOrder) => {
   toast.success('PDF exported successfully');
 };
 
+const exportBulkInboundPDF = (orders: ApiInboundOrder[]) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  orders.forEach((order, orderIdx) => {
+    if (orderIdx > 0) doc.addPage();
+
+    // Header
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0);
+    doc.text(`Inbound Verification Report`, 14, 22);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text(
+      `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+      14, 30,
+    );
+    doc.text(`Order ${orderIdx + 1} of ${orders.length}`, pageWidth - 14, 30, { align: 'right' });
+
+    doc.setDrawColor(200);
+    doc.line(14, 34, pageWidth - 14, 34);
+
+    // Order Details
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0);
+    doc.text('Order Details', 14, 44);
+
+    const details = [
+      ['GRN Number', order.inbound_number],
+      ['Batch ID', order.batch_id || '-'],
+      ['Warehouse', order.warehouse?.name || '-'],
+      ['Status', 'Verification Started'],
+      ['Expected Arrival', formatDate(order.expected_arrival_date)],
+      ['Actual Arrival', order.actual_arrival_date ? formatDate(order.actual_arrival_date) : '-'],
+      ['Created By', order.creator?.name || '-'],
+      ['Total Lines', `${order.items.length}`],
+      ['Total Units', `${order.items.reduce((s, i) => s + i.quantity, 0)}`],
+    ];
+
+    autoTable(doc, {
+      startY: 48,
+      head: [],
+      body: details,
+      theme: 'plain',
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 45, textColor: [100, 100, 100] },
+        1: { cellWidth: 'auto' },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0);
+    doc.text('Order Items', 14, finalY);
+
+    const itemRows = order.items.map((item, idx) => [
+      `${idx + 1}`,
+      item.item?.item_sku || '-',
+      item.item?.item_name || '-',
+      `${item.quantity}`,
+      item.received_quantity != null ? `${item.received_quantity}` : '-',
+      item.expiry_date ? formatDate(item.expiry_date) : '-',
+    ]);
+
+    autoTable(doc, {
+      startY: finalY + 4,
+      head: [['#', 'SKU', 'Item Name', 'Expected Qty', 'Received Qty', 'Expiry']],
+      body: itemRows,
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: {
+        fillColor: [51, 65, 85],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 30, font: 'courier' },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 25, halign: 'center' },
+        4: { cellWidth: 25, halign: 'center' },
+        5: { cellWidth: 28 },
+      },
+      margin: { left: 14, right: 14 },
+    });
+  });
+
+  // Footer on every page
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text(
+      `Bulk Verification Report — Page ${i} of ${pageCount}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: 'center' },
+    );
+  }
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+  doc.save(`Inbound-Verification-${timestamp}.pdf`);
+};
+
 export function Inbound() {
   // List state
   const [orders, setOrders] = useState<ApiInboundOrder[]>([]);
@@ -239,6 +356,10 @@ export function Inbound() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   // Server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -302,6 +423,52 @@ export function Inbound() {
     }, 400);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // ---- Bulk selection helpers ----
+  const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'arrived');
+  const allPendingSelected = pendingOrders.length > 0 && pendingOrders.every(o => selectedIds.has(o.id));
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingOrders.map(o => o.id)));
+    }
+  };
+
+  // ---- Bulk verify & export ----
+  const handleBulkVerifyAndExport = async () => {
+    const selected = orders.filter(o => selectedIds.has(o.id));
+    if (selected.length === 0) return;
+
+    setIsBulkProcessing(true);
+    try {
+      // 1. Export combined PDF first
+      exportBulkInboundPDF(selected);
+
+      // 2. Call bulk verify API
+      await apiClient.post('/inbound-applications/bulk-verify', {
+        inbound_ids: selected.map(o => o.id),
+      });
+
+      toast.success(`Verification started for ${selected.length} order(s) & PDF exported`);
+      setSelectedIds(new Set());
+      fetchOrders();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Bulk verification failed');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
 
   // ---- Start verification ----
   const handleVerifyStart = async (orderId: number) => {
@@ -467,6 +634,17 @@ export function Inbound() {
               className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
             />
           </div>
+          {pendingOrders.length > 0 && (
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-2 mt-2 text-xs text-slate-500 hover:text-blue-600 transition-colors"
+            >
+              {allPendingSelected
+                ? <CheckSquare size={14} className="text-blue-600" />
+                : <Square size={14} />}
+              Select all pending ({pendingOrders.length})
+            </button>
+          )}
         </div>
 
         {isLoading ? (
@@ -479,7 +657,10 @@ export function Inbound() {
                 <p>No inbound orders found</p>
               </div>
             )}
-            {orders.map((order) => (
+            {orders.map((order) => {
+              const isPendingOrder = order.status === 'pending' || order.status === 'arrived';
+              const isChecked = selectedIds.has(order.id);
+              return (
               <div
                 key={order.id}
                 onClick={() => setSelectedOrder(order)}
@@ -490,7 +671,19 @@ export function Inbound() {
                 }`}
               >
                 <div className="flex justify-between items-start mb-1">
-                  <span className="font-semibold text-slate-800 text-sm">{order.inbound_number}</span>
+                  <div className="flex items-center gap-2">
+                    {isPendingOrder && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(order.id); }}
+                        className="flex-shrink-0 text-slate-400 hover:text-blue-600 transition-colors"
+                      >
+                        {isChecked
+                          ? <CheckSquare size={16} className="text-blue-600" />
+                          : <Square size={16} />}
+                      </button>
+                    )}
+                    <span className="font-semibold text-slate-800 text-sm">{order.inbound_number}</span>
+                  </div>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColor(order.status)}`}>
                     {statusLabel(order.status)}
                   </span>
@@ -501,7 +694,8 @@ export function Inbound() {
                   <span>{formatDate(order.expected_arrival_date)}</span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -521,6 +715,38 @@ export function Inbound() {
             />
           </div>
         )}
+
+        {/* Bulk action bar */}
+        <AnimatePresence>
+          {selectedIds.size > 0 && (
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 20, opacity: 0 }}
+              className="border-t border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-2"
+            >
+              <span className="text-xs font-semibold text-blue-700">
+                {selectedIds.size} selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-white rounded-lg transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleBulkVerifyAndExport}
+                  disabled={isBulkProcessing}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-1.5 shadow-sm shadow-blue-200 disabled:opacity-50 transition-all"
+                >
+                  {isBulkProcessing ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  Verify & Export
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Detail Panel */}
