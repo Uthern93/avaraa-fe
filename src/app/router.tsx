@@ -15,6 +15,7 @@ const PickPack = lazy(() => import('./features/pick-pack/PickPack').then(m => ({
 const Dispatch = lazy(() => import('./features/dispatch/Dispatch').then(m => ({ default: m.Dispatch })));
 const WarehouseMap = lazy(() => import('./features/warehouse/WarehouseMap').then(m => ({ default: m.WarehouseMap })));
 const MobileScanner = lazy(() => import('./features/scanner/MobileScanner').then(m => ({ default: m.MobileScanner })));
+const Reports = lazy(() => import('./features/reports/Reports').then(m => ({ default: m.Reports })));
 
 // Auth pages
 const Login = lazy(() => import('./features/auth/Login').then(m => ({ default: m.Login })));
@@ -124,15 +125,7 @@ export const routes = [
       },
       {
         path: 'reports',
-        element: (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400">
-            <div className="w-16 h-16 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center mb-4">
-              <span className="text-2xl font-bold">?</span>
-            </div>
-            <h3 className="text-lg font-medium text-slate-600">Reports Module</h3>
-            <p className="text-sm">This module is part of the full enterprise suite.</p>
-          </div>
-        ),
+        element: withSuspense(Reports),
       },
       {
         path: 'settings',
