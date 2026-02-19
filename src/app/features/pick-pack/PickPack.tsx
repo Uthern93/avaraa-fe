@@ -30,6 +30,8 @@ import {
 import { Button } from '@/app/components/ui/button';
 import { PaginationControls } from '@/app/components/ui/pagination-controls';
 import { apiClient } from '@/hooks/useApi';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // -----------------------------------------------------------------------------
 // TYPES
@@ -193,37 +195,116 @@ export function PickPack() {
     }
   };
 
-  // ---- Download Delivery Order ----
+  // ---- Download Delivery Order (PDF) ----
   const downloadDeliveryOrder = (order: ApiDispatchOrder) => {
-    const date = new Date().toLocaleDateString();
-    let content = `DELIVERY ORDER\n\n`;
-    content += `Order: ${order.order_number}\n`;
-    content += `Customer: ${order.is_current_user ? 'Current Customer' : (order.user?.name || '-')}\n`;
-    content += `Date: ${date}\n`;
-    content += `Due Date: ${order.due_date}\n`;
-    content += `Priority: ${order.priority}\n\n`;
-    content += `----------------------------------------\n`;
-    content += `ITEMS:\n`;
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
 
-    order.items.forEach((item, index) => {
-      const loc = item.stock ? `[Loc: ${item.stock.rack_code}-${item.stock.bin_code}]` : '';
-      content += `${index + 1}. [${item.item?.item_sku || '-'}] ${item.item?.item_name || '-'} - QTY: ${item.quantity} ${loc}\n`;
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Delivery Order', 14, 22);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text(
+      `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+      14, 30,
+    );
+
+    doc.setDrawColor(200);
+    doc.line(14, 34, pageWidth - 14, 34);
+
+    // Order Details
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0);
+    doc.text('Order Details', 14, 44);
+
+    const details = [
+      ['Order Number', order.order_number],
+      ['Customer', order.is_current_user ? 'Current Customer' : (order.user?.name || '-')],
+      ['Status', statusLabel(order.status)],
+      ['Priority', (order.priority || 'normal').replace(/\b\w/g, c => c.toUpperCase())],
+      ['Due Date', order.due_date],
+      ['Created At', order.created_at ? order.created_at.split('T')[0] : '-'],
+      ['Notes', order.notes || '-'],
+      ['Total Items', `${order.items.length}`],
+      ['Total Units', `${order.items.reduce((s, i) => s + i.quantity, 0)}`],
+    ];
+
+    autoTable(doc, {
+      startY: 48,
+      head: [],
+      body: details,
+      theme: 'plain',
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 45, textColor: [100, 100, 100] },
+        1: { cellWidth: 'auto' },
+      },
+      margin: { left: 14, right: 14 },
     });
 
-    content += `----------------------------------------\n`;
-    content += `\nVerified By: __________________________\n`;
-    content += `Date: _________________________________\n`;
+    // Items Table
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
 
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `DO-${order.order_number}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0);
+    doc.text('Order Items', 14, finalY);
 
+    const itemRows = order.items.map((item, idx) => [
+      `${idx + 1}`,
+      item.item?.item_sku || '-',
+      item.item?.item_name || '-',
+      `${item.quantity}`,
+    ]);
+
+    autoTable(doc, {
+      startY: finalY + 4,
+      head: [['#', 'SKU', 'Item Name', 'Qty']],
+      body: itemRows,
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: {
+        fillColor: [51, 65, 85],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 35, font: 'courier' },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 18, halign: 'center' },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Signature area
+    const sigY = (doc as any).lastAutoTable.finalY + 16;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80);
+
+    // Footer on every page
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text(
+        `DO-${order.order_number} \u2014 Page ${i} of ${pageCount}`,
+        pageWidth / 2,
+        doc.internal.pageSize.getHeight() - 10,
+        { align: 'center' },
+      );
+    }
+
+    doc.save(`DO-${order.order_number}.pdf`);
     toast.success('Delivery Order Downloaded');
   };
 

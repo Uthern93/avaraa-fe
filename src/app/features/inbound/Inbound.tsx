@@ -17,11 +17,14 @@ import {
   Layers,
   Loader2,
   ArrowLeft,
+  Download,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { apiClient } from '@/hooks/useApi';
 import { PaginationControls } from '@/app/components/ui/pagination-controls';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // -----------------------------------------------------------------------------
 // TYPES
@@ -77,6 +80,7 @@ interface ApiInboundOrder {
   batch_id?: string;
   warehouse_id: number;
   expected_arrival_date: string;
+  actual_arrival_date?: string | null;
   status: string; // pending | verifying | completed
   notes?: string | null;
   created_by?: number;
@@ -98,9 +102,134 @@ const statusColor = (s: string) => {
 };
 const itemStatusStored = (s: string) => s === 'stored';
 
-// -----------------------------------------------------------------------------
-// MAIN COMPONENT
-// -----------------------------------------------------------------------------
+// Format ISO date string to readable format
+const formatDate = (dateStr: string) => {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
+
+const exportInboundPDF = (order: ApiInboundOrder) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Header
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Inbound Order Report', 14, 22);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100);
+  doc.text(
+    `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+    14, 30,
+  );
+
+  doc.setDrawColor(200);
+  doc.line(14, 34, pageWidth - 14, 34);
+
+  // Order Details
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0);
+  doc.text('Order Details', 14, 44);
+
+  const details = [
+    ['GRN Number', order.inbound_number],
+    ['Batch ID', order.batch_id || '-'],
+    ['Warehouse', order.warehouse?.name || '-'],
+    ['Status', statusLabel(order.status)],
+    ['Expected Arrival', formatDate(order.expected_arrival_date)],
+    ['Actual Arrival', order.actual_arrival_date ? formatDate(order.actual_arrival_date) : '-'],
+    ['Created By', order.creator?.name || '-'],
+    ['Created At', order.created_at ? formatDate(order.created_at) : '-'],
+    ['Notes', order.notes || '-'],
+    ['Total Lines', `${order.items.length}`],
+    ['Total Units', `${order.items.reduce((s, i) => s + i.quantity, 0)}`],
+    ['Stored Lines', `${order.items.filter(i => itemStatusStored(i.status)).length} / ${order.items.length}`],
+  ];
+
+  autoTable(doc, {
+    startY: 48,
+    head: [],
+    body: details,
+    theme: 'plain',
+    styles: { fontSize: 9, cellPadding: 2 },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 45, textColor: [100, 100, 100] },
+      1: { cellWidth: 'auto' },
+    },
+    margin: { left: 14, right: 14 },
+  });
+
+  // Items Table
+  const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0);
+  doc.text('Order Items', 14, finalY);
+
+  const itemRows = order.items.map((item, idx) => [
+    `${idx + 1}`,
+    item.item?.item_sku || '-',
+    item.item?.item_name || '-',
+    `${item.quantity}`,
+    item.received_quantity != null ? `${item.received_quantity}` : '-',
+    itemStatusStored(item.status) ? 'Stored' : 'Pending',
+    item.rack ? `Rack ${item.rack.code}` : '-',
+    item.bin_location || '-',
+    item.expiry_date ? formatDate(item.expiry_date) : '-',
+  ]);
+
+  autoTable(doc, {
+    startY: finalY + 4,
+    head: [['#', 'SKU', 'Item Name', 'Expected', 'Received', 'Status', 'Rack', 'Bin', 'Expiry']],
+    body: itemRows,
+    theme: 'striped',
+    styles: { fontSize: 8, cellPadding: 3 },
+    headStyles: {
+      fillColor: [51, 65, 85],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 28, font: 'courier' },
+      2: { cellWidth: 'auto' },
+      3: { cellWidth: 18, halign: 'center' },
+      4: { cellWidth: 18, halign: 'center' },
+      5: { cellWidth: 16, halign: 'center' },
+      6: { cellWidth: 18 },
+      7: { cellWidth: 16 },
+      8: { cellWidth: 22 },
+    },
+    margin: { left: 14, right: 14 },
+  });
+
+  // Footer on every page
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text(
+      `${order.inbound_number} — Page ${i} of ${pageCount}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: 'center' },
+    );
+  }
+
+  doc.save(`${order.inbound_number}.pdf`);
+  toast.success('PDF exported successfully');
+};
 
 export function Inbound() {
   // List state
@@ -180,7 +309,7 @@ export function Inbound() {
     try {
       await apiClient.put(`/inbound-applications/${orderId}/verify`);
       toast.success('Verification started. Proceed to putaway items.');
-      // Immediately update the selected order status for instant UI feedback
+
       if (selectedOrder && selectedOrder.id === orderId) {
         setSelectedOrder({ ...selectedOrder, status: 'verifying' });
       }
@@ -192,24 +321,50 @@ export function Inbound() {
     }
   };
 
-  // ---- Putaway ----
-  const openPutawayModal = (item: ApiInboundItem) => {
+  const openPutawayModal = async (item: ApiInboundItem) => {
     if (!selectedOrder) return;
     setActiveItem(item);
-    setSelectedRackId(item.rack_id);
+    setSelectedRackId(null);
     setSelectedBinId(null);
     setBins([]);
+    setRacks([]);
 
     // Fetch racks for the order's warehouse
     setIsLoadingRacks(true);
-    apiClient.get(`/racks?warehouse_id=${selectedOrder.warehouse_id}`)
-      .then(res => setRacks(res.data?.data ?? res.data ?? []))
-      .catch(() => toast.error('Failed to load racks'))
-      .finally(() => setIsLoadingRacks(false));
+    try {
+      const racksRes = await apiClient.get(`/racks?warehouse_id=${selectedOrder.warehouse_id}`);
+      const fetchedRacks: ApiRack[] = racksRes.data?.data ?? racksRes.data ?? [];
+      // Sort racks by code so earliest (A, B, C...) comes first
+      const sortedRacks = [...fetchedRacks].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+      setRacks(sortedRacks);
+      setIsLoadingRacks(false);
 
-    // If the item already has a rack, fetch bins for it
-    if (item.rack_id) {
-      fetchBinsForRack(item.rack_id, selectedOrder.warehouse_id);
+      // Auto-detect: iterate racks in order, find the first with an available bin
+      setIsLoadingBins(true);
+      for (const rack of sortedRacks) {
+        try {
+          const binsRes = await apiClient.get(`/racks/${rack.id}/bins?warehouse_id=${selectedOrder.warehouse_id}`);
+          const fetchedBins: ApiBin[] = binsRes.data?.data ?? binsRes.data ?? [];
+          const sortedBins = [...fetchedBins].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+          const availableBin = sortedBins.find(b => !(b.is_occupied ?? false));
+
+          if (availableBin) {
+            setSelectedRackId(rack.id);
+            setBins(sortedBins);
+            setSelectedBinId(availableBin.id);
+            setIsLoadingBins(false);
+            return;
+          }
+        } catch {
+          continue; // Skip rack if bins fail to load
+        }
+      }
+
+      setIsLoadingBins(false);
+      toast.warning('No available bins found. Please select manually.');
+    } catch {
+      toast.error('Failed to load racks');
+      setIsLoadingRacks(false);
     }
   };
 
@@ -343,7 +498,7 @@ export function Inbound() {
                 <p className="text-xs text-slate-500 mb-2 truncate">{order.warehouse?.name || '-'}</p>
                 <div className="flex justify-between items-center text-xs text-slate-400">
                   <span className="flex items-center gap-1"><Package size={12} /> {order.items.length} items</span>
-                  <span>{order.expected_arrival_date}</span>
+                  <span>{formatDate(order.expected_arrival_date)}</span>
                 </div>
               </div>
             ))}
@@ -380,7 +535,8 @@ export function Inbound() {
               className="flex flex-col h-full"
             >
               {/* Header */}
-              <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
+              <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center gap-3 mb-1">
                     <button
@@ -393,6 +549,15 @@ export function Inbound() {
                     <span className={`px-3 py-1 text-xs font-bold rounded-full ${statusColor(selectedOrder.status)}`}>
                       {statusLabel(selectedOrder.status)}
                     </span>
+                    {selectedOrder.status !== 'pending' && (
+                      <button
+                        onClick={() => exportInboundPDF(selectedOrder)}
+                        className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 hover:border-slate-300 transition-colors"
+                        title="Export as PDF"
+                      >
+                        <Download size={16} />
+                      </button>
+                    )}
                   </div>
                   <p className="text-slate-500">{selectedOrder.warehouse?.name || '-'}</p>
                 </div>
@@ -417,6 +582,10 @@ export function Inbound() {
                     </div>
                   )}
                 </div>
+                </div>
+                {selectedOrder.actual_arrival_date && (
+                  <p className="text-xs text-slate-400 mt-2">Arrived: {formatDate(selectedOrder.actual_arrival_date)}</p>
+                )}
               </div>
 
               {/* Content */}
@@ -429,7 +598,13 @@ export function Inbound() {
                   </div>
                   <div className="flex-1 p-4 bg-slate-50 rounded-lg border border-slate-100">
                     <span className="text-xs text-slate-400 uppercase font-bold">Expected Date</span>
-                    <p className="text-lg font-semibold text-slate-700">{selectedOrder.expected_arrival_date}</p>
+                    <p className="text-lg font-semibold text-slate-700">{formatDate(selectedOrder.expected_arrival_date)}</p>
+                  </div>
+                  <div className="flex-1 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                    <span className="text-xs text-slate-400 uppercase font-bold">Actual Arrival</span>
+                    <p className="text-lg font-semibold text-slate-700">
+                      {selectedOrder.actual_arrival_date ? formatDate(selectedOrder.actual_arrival_date) : <span className="text-slate-400">-</span>}
+                    </p>
                   </div>
                   <div className="flex-1 p-4 bg-slate-50 rounded-lg border border-slate-100">
                     <span className="text-xs text-slate-400 uppercase font-bold">Progress</span>
@@ -525,7 +700,7 @@ export function Inbound() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]"
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col"
             >
               <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-start">
                 <div>
@@ -534,146 +709,71 @@ export function Inbound() {
                     Putaway Item
                   </h3>
                   <p className="text-slate-500 text-sm mt-1">{activeItem.item?.item_name || '-'}</p>
-                  <p className="text-xs text-slate-400 font-mono">{activeItem.item?.item_sku || '-'}  Qty: {activeItem.quantity}</p>
+                  <p className="text-xs text-slate-400 font-mono">{activeItem.item?.item_sku || '-'} &middot; Qty: {activeItem.quantity}</p>
                 </div>
                 <button onClick={() => setActiveItem(null)} className="text-slate-400 hover:text-slate-600">
                   <div className="bg-white p-1 rounded-full hover:bg-slate-200 transition-colors">
-                    <span className="text-lg font-bold"></span>
+                    <span className="text-lg font-bold">&times;</span>
                   </div>
                 </button>
               </div>
 
-              <div className="p-6 overflow-y-auto space-y-8">
-                {/* Rack Selection */}
-                <div>
-                  <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <Grid3X3 size={16} className="text-blue-500" /> 1. Select Rack
-                  </h4>
-
-                  {isLoadingRacks ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <div key={i} className="h-16 rounded-lg bg-slate-100 animate-pulse" />
-                      ))}
-                    </div>
-                  ) : racks.length === 0 ? (
-                    <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-sm">
-                      No racks found for this warehouse
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {racks.map((rack) => (
-                        <button
-                          key={rack.id}
-                          onClick={() => selectRack(rack.id)}
-                          className={`p-3 rounded-lg border-2 text-left transition-all ${
-                            selectedRackId === rack.id
-                              ? 'bg-blue-50 border-blue-300 text-blue-800 ring-2 ring-offset-1 ring-blue-200 shadow-md'
-                              : 'bg-white border-slate-100 text-slate-500 hover:border-slate-200'
-                          }`}
-                        >
-                          <span className="block font-bold text-lg">Rack {rack.code}</span>
-                          <span className="text-[10px] uppercase font-bold opacity-70">{rack.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Bin Selection */}
-                <div>
-                  <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                    <MapPin size={16} className="text-blue-500" /> 2. Select Bin
-                  </h4>
-
-                  <AnimatePresence mode="wait">
-                    {selectedRackId ? (
-                      isLoadingBins ? (
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
-                            {Array.from({ length: 8 }).map((_, i) => (
-                              <div key={i} className="h-10 rounded bg-slate-200 animate-pulse" />
-                            ))}
-                          </div>
+              <div className="p-6">
+                {(isLoadingRacks || isLoadingBins) ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+                    <Loader2 size={36} className="animate-spin text-blue-500 mb-4" />
+                    <p className="text-sm font-medium text-slate-500">Finding best available location...</p>
+                    <p className="text-xs text-slate-400 mt-1">Scanning racks &amp; bins</p>
+                  </div>
+                ) : selectedRack && selectedBin ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-500 text-center">Auto-assigned to the earliest available location</p>
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 text-center">
+                      <p className="text-xs text-blue-400 uppercase font-bold mb-2">Assigned Location</p>
+                      <p className="text-3xl font-bold text-blue-800 font-mono tracking-wider">
+                        {selectedRack.code}-{selectedBin.code}
+                      </p>
+                      <div className="flex justify-center gap-6 mt-4 text-sm">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Grid3X3 size={14} className="text-blue-500" />
+                          <span>Rack <span className="font-bold">{selectedRack.code}</span></span>
+                          <span className="text-xs text-slate-400">({selectedRack.label})</span>
                         </div>
-                      ) : bins.length === 0 ? (
-                        <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-sm">
-                          No bins found for the selected rack
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <MapPin size={14} className="text-blue-500" />
+                          <span>Bin <span className="font-bold">{selectedBin.code}</span></span>
                         </div>
-                      ) : (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="bg-slate-50 p-4 rounded-xl border border-slate-200"
-                        >
-                          <p className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                            <MapPin size={12} /> Bins in Rack {selectedRack?.code}
-                          </p>
-                          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
-                            {bins.map((bin) => {
-                              const isSelected = selectedBinId === bin.id;
-                              const occupied = bin.is_occupied ?? false;
-                              return (
-                                <button
-                                  key={bin.id}
-                                  onClick={() => !occupied && setSelectedBinId(bin.id)}
-                                  disabled={occupied}
-                                  title={occupied && bin.current_item ? `Occupied: ${bin.current_item.item_name}` : bin.label}
-                                  className={`py-2 rounded font-mono text-sm font-bold transition-all ${
-                                    isSelected
-                                      ? 'bg-blue-600 text-white shadow-md scale-105'
-                                      : occupied
-                                        ? 'bg-red-50 border border-red-200 text-red-400 cursor-not-allowed'
-                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-500'
-                                  }`}
-                                >
-                                  {bin.code}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )
-                    ) : (
-                      <div className="text-center p-6 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 text-sm">
-                        Select a Rack above to view available bins
                       </div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-10 text-slate-400">
+                    <Package size={36} className="mx-auto mb-3 opacity-40" />
+                    <p className="text-sm font-medium text-slate-500">No available bins found</p>
+                    <p className="text-xs text-slate-400 mt-1">All bins across all racks are occupied</p>
+                  </div>
+                )}
               </div>
 
-              <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
-                <div className="text-sm">
-                  <span className="text-slate-400">Selected Location: </span>
-                  {selectedRack && selectedBin ? (
-                    <span className="font-mono font-bold text-slate-800 bg-white px-2 py-1 rounded border border-slate-200">
-                      {selectedRack.code}-{selectedBin.code}
-                    </span>
-                  ) : (
-                    <span className="italic text-slate-300">None</span>
-                  )}
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setActiveItem(null)}
-                    className="px-6 py-2 text-slate-500 font-bold hover:bg-slate-200 rounded-lg transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmPutaway}
-                    disabled={!selectedRackId || !selectedBinId || isSaving}
-                    className={`px-6 py-2 text-white font-bold rounded-lg shadow-md transition-all flex items-center gap-2 ${
-                      !selectedRackId || !selectedBinId || isSaving
-                        ? 'bg-slate-300 cursor-not-allowed shadow-none'
-                        : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
-                    }`}
-                  >
-                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
-                    {isSaving ? 'Saving...' : 'Confirm'}
-                  </button>
-                </div>
+              <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                <button
+                  onClick={() => setActiveItem(null)}
+                  className="px-6 py-2 text-slate-500 font-bold hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmPutaway}
+                  disabled={!selectedRackId || !selectedBinId || isSaving || isLoadingRacks || isLoadingBins}
+                  className={`px-6 py-2 text-white font-bold rounded-lg shadow-md transition-all flex items-center gap-2 ${
+                    !selectedRackId || !selectedBinId || isSaving || isLoadingRacks || isLoadingBins
+                      ? 'bg-slate-300 cursor-not-allowed shadow-none'
+                      : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
+                  }`}
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                  {isSaving ? 'Saving...' : 'Confirm Putaway'}
+                </button>
               </div>
             </motion.div>
           </motion.div>

@@ -73,6 +73,13 @@ interface ApiItem {
   item_name: string;
   category_id: number;
   weight: string;
+  storage_type?: number | null;
+  qty_per_pallet?: number | null;
+  qty_per_carton?: number | null;
+  dimension_width?: number | string | null;
+  dimension_height?: number | string | null;
+  dimension_depth?: number | string | null;
+  dimension_unit?: string | null;
   created_by?: number;
   updated_by?: number;
   created_at?: string;
@@ -125,6 +132,13 @@ interface ItemFormData {
   category_id: string;
   weight: string;
   weight_unit: string;
+  item_type: string;
+  quantity_per_pallet: string;
+  quantity_per_carton: string;
+  dimension_width: string;
+  dimension_height: string;
+  dimension_depth: string;
+  dimension_unit: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -276,7 +290,7 @@ export function ItemMaster() {
 
   const openAddModal = () => {
     setEditingId(null);
-    setFormData({ weight_unit: 'kg' });
+    setFormData({ weight_unit: 'kg', item_type: '', dimension_unit: 'cm' });
     setIsModalOpen(true);
   };
 
@@ -289,6 +303,13 @@ export function ItemMaster() {
       category_id: item.category_id ? String(item.category_id) : '',
       weight: weightMatch ? weightMatch[1] : (item.weight || ''),
       weight_unit: weightMatch ? weightMatch[2].toLowerCase() : 'kg',
+      item_type: item.storage_type ? String(item.storage_type) : '',
+      quantity_per_pallet: item.qty_per_pallet ? String(item.qty_per_pallet) : '',
+      quantity_per_carton: item.qty_per_carton ? String(item.qty_per_carton) : '',
+      dimension_width: item.dimension_width ? String(item.dimension_width) : '',
+      dimension_height: item.dimension_height ? String(item.dimension_height) : '',
+      dimension_depth: item.dimension_depth ? String(item.dimension_depth) : '',
+      dimension_unit: item.dimension_unit || 'cm',
     });
     setIsModalOpen(true);
   };
@@ -300,11 +321,19 @@ export function ItemMaster() {
     }
 
     const weight = formData.weight ? `${formData.weight}${formData.weight_unit || 'kg'}` : null;
-    const payload = {
+    const storageType = formData.item_type ? Number(formData.item_type) : null;
+    const payload: Record<string, any> = {
       item_sku: formData.item_sku,
       item_name: formData.item_name,
       category_id: formData.category_id ? Number(formData.category_id) : null,
       weight,
+      storage_type: storageType,
+      qty_per_pallet: storageType === 1 && formData.quantity_per_pallet ? Number(formData.quantity_per_pallet) : null,
+      qty_per_carton: storageType === 2 && formData.quantity_per_carton ? Number(formData.quantity_per_carton) : null,
+      dimension_width: storageType === 3 && formData.dimension_width ? Number(formData.dimension_width) : null,
+      dimension_height: storageType === 3 && formData.dimension_height ? Number(formData.dimension_height) : null,
+      dimension_depth: storageType === 3 && formData.dimension_depth ? Number(formData.dimension_depth) : null,
+      dimension_unit: storageType === 3 ? (formData.dimension_unit || 'cm') : null,
     };
 
     setIsSaving(true);
@@ -634,6 +663,80 @@ export function ItemMaster() {
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={formData.item_type || ''} onValueChange={(val) => handleSelectChange('item_type', val)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">Pallet</SelectItem>
+                        <SelectItem value="2">Carton</SelectItem>
+                        <SelectItem value="3">Odd Size</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {formData.item_type === '1' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="quantity_per_pallet">Quantity per Pallet</Label>
+                      <Input
+                        id="quantity_per_pallet" name="quantity_per_pallet"
+                        type="number" min="1" placeholder="e.g. 48"
+                        value={formData.quantity_per_pallet || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  )}
+
+                  {formData.item_type === '2' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="quantity_per_carton">Quantity per Carton</Label>
+                      <Input
+                        id="quantity_per_carton" name="quantity_per_carton"
+                        type="number" min="1" placeholder="e.g. 24"
+                        value={formData.quantity_per_carton || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  )}
+
+                  {formData.item_type === '3' && (
+                    <div className="space-y-2">
+                      <Label>Size Dimension (W &times; H &times; D)</Label>
+                      <div className="flex gap-2">
+                        <div className="grid grid-cols-3 gap-2 flex-1">
+                          <Input
+                            name="dimension_width" type="number" step="0.01" min="0"
+                            placeholder="Width" value={formData.dimension_width || ''}
+                            onChange={handleInputChange}
+                          />
+                          <Input
+                            name="dimension_height" type="number" step="0.01" min="0"
+                            placeholder="Height" value={formData.dimension_height || ''}
+                            onChange={handleInputChange}
+                          />
+                          <Input
+                            name="dimension_depth" type="number" step="0.01" min="0"
+                            placeholder="Depth" value={formData.dimension_depth || ''}
+                            onChange={handleInputChange}
+                          />
+                        </div>
+                        <Select value={formData.dimension_unit || 'cm'} onValueChange={(val) => handleSelectChange('dimension_unit', val)}>
+                          <SelectTrigger className="w-20">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="m">m</SelectItem>
+                            <SelectItem value="cm">cm</SelectItem>
+                            <SelectItem value="mm">mm</SelectItem>
+                            <SelectItem value="inch">inch</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
                   <DialogFooter className="pt-4">
                     <DialogClose asChild><Button variant="outline" type="button">Cancel</Button></DialogClose>
                     <Button type="button" className="bg-blue-600 hover:bg-blue-700 ml-2" onClick={() => handleSave()} disabled={isSaving}>
@@ -756,7 +859,7 @@ export function ItemMaster() {
                                   </SelectTrigger>
                                   <SelectContent>
                                     {warehouseRacks.map(rack => (
-                                      <SelectItem key={rack.id} value={String(rack.id)}>{rack.code} - {rack.label}</SelectItem>
+                                      <SelectItem key={rack.id} value={String(rack.id)}>{rack.label}</SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
