@@ -105,10 +105,12 @@ export default function RootLayout() {
           {isSidebarOpen ? (
             <>
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center">
-                  <Boxes className="text-white" size={20} />
-                </div>
-                <span className="text-xl font-bold text-slate-800">Avaraa</span>
+                <img 
+                  src="/assets/images/SNIV-logo.png" 
+                  alt="SNIV Logo" 
+                  className="h-9 w-9 rounded-lg object-contain"
+                />
+                <span className="text-xl font-bold text-slate-800">SNIV</span>
               </div>
               <button
                 onClick={() => setIsSidebarOpen(false)}
@@ -121,10 +123,14 @@ export default function RootLayout() {
           ) : (
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center hover:opacity-90 transition-opacity"
+              className="w-9 h-9 rounded-lg flex items-center justify-center hover:opacity-90 transition-opacity"
               title="Expand sidebar"
             >
-              <Boxes className="text-white" size={20} />
+              <img 
+                src="/assets/images/SNIV-logo.png" 
+                alt="SNIV Logo" 
+                className="h-9 w-9 rounded-lg object-contain"
+              />
             </button>
           )}
         </div>
