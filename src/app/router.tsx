@@ -119,7 +119,7 @@ export const routes = [
               <span className="text-2xl font-bold">?</span>
             </div>
             <h3 className="text-lg font-medium text-slate-600">Returns Module</h3>
-            <p className="text-sm">This module is part of the full enterprise suite.</p>
+            <p className="text-sm">This module is still in development.</p>
           </div>
         ),
       },

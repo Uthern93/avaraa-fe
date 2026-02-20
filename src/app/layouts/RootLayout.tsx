@@ -40,7 +40,7 @@ export const NAVIGATION_ITEMS: SidebarItem[] = [
   { id: 'inbound', path: '/inbound', label: 'Inbound & Putaway', icon: ArrowDownToLine, roles: ['admin', 'manager', 'staff'] },
   { id: 'pick-pack', path: '/pick-pack', label: 'Pick and Pack', icon: ClipboardList, roles: ['admin', 'manager', 'staff'] },
   { id: 'dispatch', path: '/dispatch', label: 'Dispatch', icon: Truck, roles: ['admin', 'manager', 'staff'] },
-  // { id: 'returns', path: '/returns', label: 'Return', icon: ArrowUpFromLine, roles: ['admin', 'manager'] },
+  { id: 'returns', path: '/returns', label: 'Return', icon: ArrowUpFromLine, roles: ['admin', 'manager'] },
   { id: 'warehouse', path: '/warehouse/map', label: 'Warehouse Map', icon: Map, roles: ['admin', 'manager'] },
   { id: 'reports', path: '/reports', label: 'Reports', icon: FileBarChart, roles: ['admin', 'manager'] },
   // { id: 'settings', path: '/settings', label: 'Setup', icon: Settings, roles: ['admin'] },

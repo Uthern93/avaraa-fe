@@ -31,10 +31,6 @@ import { apiClient } from '@/hooks/useApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// -----------------------------------------------------------------------------
-// TYPES
-// -----------------------------------------------------------------------------
-
 interface ApiDispatchItem {
   id: number;
   delivery_order_id: number;
